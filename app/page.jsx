@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN DE SUPABASE ---
-// Las llaves se leen de las variables de entorno de Vercel por seguridad
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
@@ -34,12 +33,17 @@ export default function App() {
     }
     
     setLoading(true);
-    const { data: proyData } = await supabase.from('proyectos').select('*').order('creado_at', { ascending: false });
-    const { data: hitosData } = await supabase.from('hitos').select('*');
-    
-    if (proyData) setProyectos(proyData);
-    if (hitosData) setHitos(hitosData);
-    setLoading(false);
+    try {
+      const { data: proyData } = await supabase.from('proyectos').select('*').order('creado_at', { ascending: false });
+      const { data: hitosData } = await supabase.from('hitos').select('*');
+      
+      if (proyData) setProyectos(proyData);
+      if (hitosData) setHitos(hitosData);
+    } catch (err) {
+      console.error("Error al obtener datos:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -61,7 +65,7 @@ export default function App() {
 
   // Función para crear un nuevo proyecto real en Supabase
   const handleCrearProyecto = async (formData) => {
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('proyectos')
       .insert([
         { 
@@ -71,11 +75,10 @@ export default function App() {
           monto_base: parseFloat(formData.monto),
           estado: 'Activo'
         }
-      ])
-      .select();
+      ]);
 
     if (!error) {
-      fetchData(); // Recargar lista de la base de datos
+      await fetchData(); 
       setShowModalProyecto(false);
     } else {
       console.error("Error al crear proyecto:", error);
@@ -84,9 +87,9 @@ export default function App() {
 
   if (loading && proyectos.length === 0) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50">
-        <Loader2 className="animate-spin text-[#003366] mb-4" size={48} />
-        <p className="text-slate-500 font-bold tracking-tight">Iniciando ERP Urrejola...</p>
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50 text-[#003366]">
+        <Loader2 className="animate-spin mb-4" size={48} />
+        <p className="font-bold tracking-tight">Sincronizando ERP Urrejola...</p>
       </div>
     );
   }
@@ -191,7 +194,9 @@ function SetupGuide() {
           <AlertCircle className="text-[#003366]" size={40} />
         </div>
         <h2 className="text-2xl font-bold mb-4 text-slate-800">Variables de Entorno</h2>
-        <p className="text-slate-500 mb-8 font-medium leading-relaxed">Debes configurar las llaves de Supabase en el panel de Vercel (Settings -> Environment Variables) para activar la base de datos.</p>
+        <p className="text-slate-500 mb-8 font-medium leading-relaxed">
+          Debes configurar las llaves de Supabase en el panel de Vercel (Settings {"->"} Environment Variables) para activar la base de datos.
+        </p>
         <div className="text-left bg-slate-900 text-emerald-400 p-6 rounded-2xl text-xs font-mono mb-8 overflow-x-auto shadow-inner">
           NEXT_PUBLIC_SUPABASE_URL="..."<br/>
           NEXT_PUBLIC_SUPABASE_ANON_KEY="..."
@@ -357,4 +362,132 @@ function ModalNuevoProyecto({ onClose, onSubmit }) {
           </div>
           <div className="space-y-1">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Monto Base Inicial ($)</label>
-            <input
+            <input 
+              required
+              type="number"
+              className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-black text-[#003366] focus:ring-2 focus:ring-[#003366] outline-none"
+              placeholder="5000000"
+              value={form.monto}
+              onChange={(e) => setForm({...form, monto: e.target.value})}
+            />
+          </div>
+          <button 
+            type="submit"
+            className="w-full bg-[#003366] text-white py-4 rounded-2xl font-black shadow-xl shadow-[#003366]/20 hover:bg-[#002244] hover:-translate-y-1 active:translate-y-0 transition-all flex items-center justify-center gap-2 mt-4 tracking-tight"
+          >
+            <Save size={20}/> Guardar en Supabase
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function FacturacionView({ proyectos, hitos, onSolicitar }) {
+  const pendientes = hitos.filter(h => h.estado_factura !== 'Facturado');
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Hitos Pendientes de Factura</h2>
+      {pendientes.length === 0 && (
+        <div className="bg-white p-16 rounded-[3rem] border-2 border-dashed border-slate-100 text-center flex flex-col items-center">
+          <CheckCircle2 size={56} className="text-emerald-500 mb-4 opacity-30" />
+          <p className="text-slate-400 font-black uppercase tracking-widest text-sm">Todo al día. No hay solicitudes pendientes.</p>
+        </div>
+      )}
+      <div className="grid gap-4">
+        {pendientes.map(h => {
+          const p = proyectos.find(proj => proj.id === h.proyecto_id);
+          return (
+            <div key={h.id} className="bg-white p-6 rounded-[2rem] border border-slate-200 flex flex-col md:flex-row items-center justify-between shadow-sm hover:shadow-md transition-shadow gap-4">
+              <div className="flex items-center gap-4 w-full md:w-auto">
+                <div className={`p-4 rounded-2xl ${h.estado_factura === 'En Proceso' ? 'bg-amber-100 text-amber-600' : 'bg-blue-50 text-[#003366]'}`}>
+                  <FileText size={24}/>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-slate-700 leading-tight">{h.descripcion}</h4>
+                    <span className="text-[9px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-black uppercase tracking-widest border border-amber-200">{h.estado_factura}</span>
+                  </div>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-tight">{p?.nombre} • {p?.cliente}</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-between w-full md:w-auto md:justify-end gap-8 border-t md:border-t-0 pt-4 md:pt-0 border-slate-50">
+                <p className="font-black text-xl text-slate-800 tracking-tighter">${Number(h.monto).toLocaleString()}</p>
+                {h.estado_factura === 'Pendiente' ? (
+                   <button 
+                    onClick={() => onSolicitar(h)} 
+                    className="bg-[#003366] text-white px-6 py-3 rounded-2xl text-sm font-black shadow-lg shadow-[#003366]/10 hover:bg-[#002244] active:scale-95 transition-all tracking-tight"
+                   >
+                     Solicitar Factura
+                   </button>
+                ) : (
+                   <div className="text-amber-600 font-black flex items-center gap-2 bg-amber-50 px-5 py-2.5 rounded-xl text-[10px] uppercase tracking-widest">
+                    <Clock size={14} className="animate-pulse" /> Pendiente Contador
+                   </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ModalSolicitud({ hito, proyecto, onClose, onSubmit }) {
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-50 flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 animate-in zoom-in-95 border border-slate-100">
+        <div className="flex justify-between items-center mb-8">
+          <h3 className="text-2xl font-black text-slate-800 tracking-tight">Emitir Solicitud</h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-50 rounded-full transition-colors text-slate-400"><X size={20}/></button>
+        </div>
+        <div className="bg-slate-50 p-6 rounded-[1.5rem] mb-8 space-y-3 text-sm border border-slate-100 shadow-inner">
+          <p className="flex justify-between"><span className="text-slate-400 font-black uppercase text-[9px] tracking-widest">Proyecto</span> <span className="font-bold text-slate-700">{proyecto?.nombre}</span></p>
+          <p className="flex justify-between items-center"><span className="text-slate-400 font-black uppercase text-[9px] tracking-widest">Importe</span> <span className="font-black text-[#003366] text-lg tracking-tight">${Number(hito?.monto).toLocaleString()}</span></p>
+        </div>
+        <div className="space-y-3">
+          <button 
+            onClick={() => onSubmit(hito.id, hito.descripcion)}
+            className="w-full bg-[#003366] text-white py-5 rounded-2xl font-black shadow-xl shadow-[#003366]/20 hover:bg-[#002244] transition-all flex items-center justify-center gap-2 tracking-tight"
+          >
+            Confirmar Solicitud
+          </button>
+          <button onClick={onClose} className="w-full py-4 text-slate-400 font-black text-xs uppercase tracking-widest hover:text-slate-600 transition-colors">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ title, amount, trend, icon, color }) {
+  return (
+    <div className={`bg-white p-6 rounded-[2.5rem] shadow-sm border-l-8 ${color} hover:shadow-md transition-all`}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="p-3 bg-slate-50 rounded-2xl text-slate-700">{icon}</div>
+        <span className="text-[9px] font-black text-slate-400 tracking-widest uppercase">{trend}</span>
+      </div>
+      <p className="text-sm text-slate-500 font-bold mb-1">{title}</p>
+      <h4 className="text-4xl font-black text-slate-800 tracking-tighter">{amount}</h4>
+    </div>
+  );
+}
+
+function NavItem({ icon, label, active, onClick }) {
+  return (
+    <button onClick={onClick} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all ${active ? 'bg-white text-[#003366] font-bold shadow-md shadow-black/5' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}>
+      {icon} <span className="text-sm font-bold tracking-tight">{label}</span>
+      {active && <ChevronRight size={16} className="ml-auto opacity-40" />}
+    </button>
+  );
+}
+
+function PlaceholderSection({ title, icon }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-[60vh] text-slate-200 bg-white rounded-[4rem] border-4 border-dashed border-slate-50 p-10">
+      <div className="bg-slate-50 p-10 rounded-full mb-6 text-slate-100 scale-125">{icon}</div>
+      <h3 className="text-2xl font-bold text-slate-400 tracking-tight">{title}</h3>
+      <p className="text-xs mt-3 font-bold text-slate-300 uppercase tracking-widest">Módulo en Desarrollo</p>
+    </div>
+  );
+}
